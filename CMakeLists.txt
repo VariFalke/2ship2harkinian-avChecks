@@ -206,7 +206,80 @@ endif()
 
 add_subdirectory(ZAPDTR/ZAPD ${CMAKE_BINARY_DIR}/ZAPD)
 add_subdirectory(OTRExporter)
+
+include(FetchContent)
+
+set(APCLIENTPP_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(
+    apclientpp
+    GIT_REPOSITORY https://github.com/black-sliver/apclientpp.git
+    GIT_TAG main
+)
+
+FetchContent_MakeAvailable(apclientpp)
+
+FetchContent_Declare(
+    wswrap
+    GIT_REPOSITORY https://github.com/black-sliver/wswrap.git
+    GIT_TAG main
+    GIT_SUBMODULES ""
+)
+
+FetchContent_Declare(
+    websocketpp
+    GIT_REPOSITORY https://github.com/zaphoyd/websocketpp.git
+    GIT_TAG 0.8.2
+    SOURCE_SUBDIR cmake-header-only
+)
+
+FetchContent_Declare(
+    asio
+    GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+    GIT_TAG asio-1-30-2
+    SOURCE_SUBDIR cmake-header-only
+)
+
+FetchContent_Declare(
+    valijson
+    GIT_REPOSITORY https://github.com/tristanpenman/valijson.git
+    GIT_TAG v1.1.2
+    GIT_SUBMODULES ""
+)
+
+set(valijson_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(valijson_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+FetchContent_MakeAvailable(wswrap websocketpp asio valijson)
+
+find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
+
 add_subdirectory(mm)
+
+target_include_directories(2ship PRIVATE
+    "${wswrap_SOURCE_DIR}/include"
+    "${websocketpp_SOURCE_DIR}"
+    "${asio_SOURCE_DIR}/asio/include"
+)
+
+target_compile_definitions(2ship PRIVATE ASIO_STANDALONE)
+
+target_link_libraries(2ship PRIVATE
+    apclientpp
+    ValiJSON::valijson
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ZLIB::ZLIB
+)
+
+if(WIN32)
+    target_compile_definitions(2ship PRIVATE
+        WIN32_LEAN_AND_MEAN
+        _WIN32_WINNT=0x0601
+    )
+    target_link_libraries(2ship PRIVATE ws2_32 crypt32)
+endif()
 
 set_property(TARGET 2ship PROPERTY APPIMAGE_DESKTOP_FILE_TERMINAL YES)
 set_property(TARGET 2ship PROPERTY APPIMAGE_DESKTOP_FILE "${CMAKE_SOURCE_DIR}/mm/linux/2s2h.desktop")
