@@ -273,7 +273,7 @@ std::unordered_map<RandoCheckId, bool> checksInLogic;
 static u32 lastFrame = 0;
 
 void RefreshChecksInLogic() {
-    if (gGameState == NULL || gGameState->frames - lastFrame < 20 || CVAR_OUT_OF_LOGIC_MODE == CHECK_MODE_NORMAL) {
+    if (gGameState == NULL || gGameState->frames - lastFrame < 20) {
         return;
     }
 
@@ -334,7 +334,8 @@ void RefreshChecksInLogic() {
         for (auto& [randoCheckId, accessLogicFunc] : randoRegion.checks) {
             auto& randoStaticCheck = Rando::StaticData::Checks[randoCheckId];
             auto& randoSaveCheck = RANDO_SAVE_CHECKS[randoCheckId];
-            if (randoSaveCheck.shuffled && !randoSaveCheck.obtained && accessLogicFunc.first()) {
+            if (randoSaveCheck.shuffled && !randoSaveCheck.obtained && !randoSaveCheck.skipped && accessLogicFunc.first()) {
+
                 checksInLogic.insert({ randoCheckId, true });
             }
         }
@@ -342,7 +343,7 @@ void RefreshChecksInLogic() {
 }
 
 void CheckTrackerDrawNonLogicalList() {
-    RefreshChecksInLogic();
+    
 
     for (auto& sceneId : sortedSceneIds) {
         if (sceneId == SCENE_MAX) {
@@ -527,7 +528,8 @@ void CheckTrackerWindow::Draw() {
         return;
     }
 
-    if (CVAR_SHOW_SEARCH) {
+    RefreshChecksInLogic();
+     if (CVAR_SHOW_SEARCH) {
         bool sameLine = !(ImGui::GetContentRegionAvail().x <= 300.0f * trackerScale);
         auto totalCheckCount = GetTotalCheckCount();
 
@@ -566,10 +568,14 @@ void CheckTrackerWindow::Draw() {
             ImGui::SameLine(ImGui::GetContentRegionAvail().x -
                             (ImGui::CalcTextSize("Total: ").x + ImGui::CalcTextSize(totalCheckCount.c_str()).x));
         }
-        ImGui::Text("Total: %s", totalCheckCount.c_str());
-    }
 
-    if (CVAR_SHOW_CHECK_TYPE_FILTER) {
+        ImGui::Text("Total: %s", totalCheckCount.c_str());
+     }
+
+     ImGui::Text("Available: %zu", checksInLogic.size());
+
+     if (CVAR_SHOW_CHECK_TYPE_FILTER) {
+
         auto columns = ImGui::GetContentRegionAvail().x / (24.0f * trackerScale + 15.0f);
 
         if (ImGui::BeginTable("Type Filter", columns)) {
