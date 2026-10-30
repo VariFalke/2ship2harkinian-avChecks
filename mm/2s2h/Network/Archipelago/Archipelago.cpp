@@ -15,6 +15,7 @@
 #include "2s2h/Rando/ActorBehavior/ActorBehavior.h"
 #include "2s2h/Rando/MiscBehavior/MiscBehavior.h"
 #include "2s2h/Rando/MiscBehavior/ClockShuffle.h"
+#include <deque>
 
 // Must be defined BEFORE any websocketpp / wswrap / apclientpp includes.
 #ifdef _WIN32
@@ -75,6 +76,14 @@ static bool sPendingDeathLink = false;
 static bool sSentDeathLinkThisDeath = false;
 static std::string sPendingDeathLinkSource;
 static std::string sPendingDeathLinkCause;
+
+struct PendingSharedDamage {
+    s16 healthUnits;
+    std::string source;
+};
+
+static std::deque<PendingSharedDamage> sPendingSharedDamage;
+static bool sApplyingSharedDamage = false;
 
 static std::string GetCertPath() {
     std::filesystem::path base =
@@ -207,6 +216,8 @@ void Archipelago::Reset() {
     sSentDeathLinkThisDeath = false;
     sPendingDeathLinkSource.clear();
     sPendingDeathLinkCause.clear();
+    sPendingSharedDamage.clear();
+    sApplyingSharedDamage = false;
 }
 
 void Archipelago::Enable() {
@@ -294,6 +305,44 @@ void Archipelago::SendChat(const char* msg) {
 
 void Archipelago::RegisterHooks() {
     bool shouldRegister = GetState() != static_cast<u8>(APClient::State::DISCONNECTED);
+
+    COND_HOOK(GameInteractor::OnPlayerHealthChange, shouldRegister, [this](s16 actualChange) {
+        // Kein DamageLink bei Heilung oder sehr kleinen HP-Aenderungen.
+        if (actualChange > -4) {
+            return;
+        }
+
+        // Empfangenen Schaden niemals erneut verschicken.
+        if (sApplyingSharedDamage) {
+            return;
+        }
+
+        // Nur mit gueltigem Archipelago-Spielstand und Verbindung.
+        if (!IS_ARCHI || !gPlayState || !isSaveSynced || !IsConnected()) {
+            return;
+        }
+
+        // DamageLink muss aktiviert sein.
+        if (!CVarGetInteger("gArchipelago.DamageLink", 0)) {
+            return;
+        }
+
+        // Bei einem eigenen Tod hat DeathLink Vorrang, falls aktiviert.
+        if (gSaveContext.save.saveInfo.playerData.health == 0 && CVarGetInteger("gArchipelago.DeathLink", 0)) {
+            return;
+        }
+
+        // Archipelago SharedDamage: 80 Punkte entsprechen einem Herz.
+        const int damagePoints = -static_cast<int>(actualChange) * 5;
+
+        sAPClient->Bounce({ { "time", static_cast<double>(time(nullptr)) },
+                            { "uuid", sAPClient->get_player_number() },
+                            { "source", sAPClient->get_slot() },
+                            { "damage_points", damagePoints } },
+                          {}, {}, { "SharedDamage" });
+
+        SPDLOG_INFO("[DamageLink] Gesendet: {} HP / {} DamagePoints", -actualChange, damagePoints);
+    });
 
     COND_HOOK(GameInteractor::OnGameStateUpdate, shouldRegister, [&]() { OnGameTick(); });
 

@@ -5144,6 +5144,8 @@ void Interface_SetBButtonInterfaceDoAction(PlayState* play, s16 bButtonDoAction)
  * @return false if player is out of health
  */
 s32 Health_ChangeBy(PlayState* play, s16 healthChange) {
+    s16 previousHealth = gSaveContext.save.saveInfo.playerData.health;
+
     if (healthChange > 0) {
         Audio_PlaySfx(NA_SE_SY_HP_RECOVER);
     } else if (gSaveContext.save.saveInfo.playerData.doubleDefense && (healthChange < 0)) {
@@ -5159,10 +5161,15 @@ s32 Health_ChangeBy(PlayState* play, s16 healthChange) {
 
     if (gSaveContext.save.saveInfo.playerData.health <= 0) {
         gSaveContext.save.saveInfo.playerData.health = 0;
-        return false;
-    } else {
-        return true;
     }
+
+    s16 actualChange = gSaveContext.save.saveInfo.playerData.health - previousHealth;
+
+    if (actualChange != 0) {
+        GameInteractor_ExecuteOnPlayerHealthChange(actualChange);
+    }
+
+    return gSaveContext.save.saveInfo.playerData.health > 0;
 }
 
 void Health_GiveHearts(s16 hearts) {

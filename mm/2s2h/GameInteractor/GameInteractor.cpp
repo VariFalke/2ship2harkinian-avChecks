@@ -28,6 +28,12 @@ void GameInteractor_ExecuteOnGameStateUpdate() {
     GameInteractor::Instance->ExecuteHooks<GameInteractor::OnGameStateUpdate>();
 }
 
+void GameInteractor_ExecuteOnPlayerHealthChange(s16 actualChange) {
+    if (GameInteractor::Instance != nullptr) {
+        GameInteractor::Instance->ExecuteHooks<GameInteractor::OnPlayerHealthChange>(actualChange);
+    }
+}
+
 void GameInteractor_ExecuteOnConsoleLogoUpdate() {
     GameInteractor::Instance->ExecuteHooks<GameInteractor::OnConsoleLogoUpdate>();
 }
