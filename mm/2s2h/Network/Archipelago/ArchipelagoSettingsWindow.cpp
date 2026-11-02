@@ -126,6 +126,11 @@ static void DrawArchipelagoMenu() {
             UIWidgets::CheckboxOptions().Color(THEME_COLOR).Tooltip("You die, others die.\nOthers die, you die!"))) {
         Archipelago::Instance->UpdateDeathLinkTag();
     }
+    if (UIWidgets::CVarCheckbox(
+            "Damage Link", "gArchipelago.DamageLink",
+            UIWidgets::CheckboxOptions().Color(THEME_COLOR).Tooltip("Share damage with other Archipelago players."))) {
+        Archipelago::Instance->UpdateDeathLinkTag();
+    }
 
     UIWidgets::CVarSliderFloat("Console Scale", "gArchipelago.Console.Scale",
                                UIWidgets::FloatSliderOptions()

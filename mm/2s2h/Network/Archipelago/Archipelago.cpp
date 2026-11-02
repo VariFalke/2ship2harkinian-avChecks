@@ -67,6 +67,8 @@ extern "C" {
 void TitleSetup_Init(GameState*);
 void FileSelect_Init(GameState*);
 void ConsoleLogo_Init(GameState*);
+
+void Player_ApplyDamageLinkReaction(PlayState* play, Player* player, s16 damage);
 }
 
 // Storing statically here, because APClient isn't useable from header...
@@ -308,7 +310,7 @@ void Archipelago::RegisterHooks() {
 
     COND_HOOK(GameInteractor::OnPlayerHealthChange, shouldRegister, [this](s16 actualChange) {
         // Kein DamageLink bei Heilung oder sehr kleinen HP-Aenderungen.
-        if (actualChange > -4) {
+        if (actualChange > -1) {
             return;
         }
 
@@ -371,8 +373,13 @@ void Archipelago::RegisterHooks() {
 
     sAPClient->set_room_info_handler([&]() {
         std::list<std::string> tags;
+
         if (CVarGetInteger("gArchipelago.DeathLink", 0)) {
             tags.push_back("DeathLink");
+        }
+
+        if (CVarGetInteger("gArchipelago.DamageLink", 0)) {
+            tags.push_back("SharedDamage");
         }
 
         std::string slot = CVarGetString("gArchipelago.Slot", "");
@@ -531,12 +538,76 @@ void Archipelago::RegisterHooks() {
             return;
         }
         bool isDeathLink = false;
+        bool isSharedDamage = false;
+
         for (const auto& tag : *tags) {
-            if (tag.is_string() && tag.get_ref<const std::string&>() == "DeathLink") {
+            if (!tag.is_string()) {
+                continue;
+            }
+
+            const std::string& tagName = tag.get_ref<const std::string&>();
+
+            if (tagName == "DeathLink") {
                 isDeathLink = true;
-                break;
+            } else if (tagName == "SharedDamage") {
+                isSharedDamage = true;
             }
         }
+
+        if (isSharedDamage) {
+            // DamageLink muss aktiviert sein
+            if (!sAPClient || !CVarGetInteger("gArchipelago.DamageLink", 0)) {
+                return;
+            }
+
+            // Schadensdaten aus der JSON-Nachricht holen
+            auto payload = data.find("data");
+
+            if (payload == data.end() || !payload->is_object()) {
+                return;
+            }
+
+            auto source = payload->find("source");
+            auto points = payload->find("damage_points");
+
+            // Pruefen, ob beide Werte vorhanden und gueltig sind
+            if (source == payload->end() || !source->is_string() || points == payload->end() ||
+                !points->is_number_integer()) {
+                SPDLOG_WARN("[DamageLink] Ungueltiges Schadenspaket");
+                return;
+            }
+
+            const std::string& sourceSlot = source->get_ref<const std::string&>();
+
+            // Eigene Schadensnachrichten ignorieren
+            if (sourceSlot == sAPClient->get_slot()) {
+                return;
+            }
+
+            const int64_t damagePoints = points->get<int64_t>();
+
+            // Maximal 20 Herzen, mindestens ein Viertelherz
+            if (damagePoints < 5 || damagePoints > 1600) {
+                SPDLOG_WARN("[DamageLink] Ungueltige Schadensmenge: {}", damagePoints);
+                return;
+            }
+
+            // Archipelago-Schaden in interne 2Ship-HP umrechnen
+            const s16 healthUnits = static_cast<s16>(damagePoints / 5);
+
+            // Warteschlange begrenzen
+            if (sPendingSharedDamage.size() >= 32) {
+                return;
+            }
+
+            // Schaden fuer die Anwendung vormerken
+            sPendingSharedDamage.push_back({ healthUnits, sourceSlot });
+
+            SPDLOG_INFO("[DamageLink] Empfangen von {}: {} HP", sourceSlot, healthUnits);
+
+            return;
+        }
+
         if (!isDeathLink) {
             return;
         }
@@ -673,6 +744,68 @@ void Archipelago::OnGameTick() {
             ArchipelagoConsole_SendMessage("[LOG] Sent death link.");
         } else if (currentHealth > 0) {
             sSentDeathLinkThisDeath = false;
+        }
+    }
+
+    // Empfangenen DamageLink verarbeiten
+    if (!IS_ARCHI || !gPlayState || !isSaveSynced || !IsConnected() || !CVarGetInteger("gArchipelago.DamageLink", 0)) {
+
+        // Keine alten Schadenspakete nach einem Verbindungswechsel anwenden
+        sPendingSharedDamage.clear();
+
+    } else if (!sPendingSharedDamage.empty()) {
+
+        // Bereits tot? Weitere Schadenspakete verwerfen
+        if (gSaveContext.save.saveInfo.playerData.health <= 0) {
+            sPendingSharedDamage.clear();
+        }
+
+        // Schaden nur anwenden, wenn Link gerade steuerbar ist
+        else if (gPlayState->pauseCtx.state == 0 && GameInteractor::Instance != nullptr &&
+                 GameInteractor::Instance->CanProcessActions() == GI_AVAILABILITY_READY) {
+
+            PendingSharedDamage pending = sPendingSharedDamage.front();
+            sPendingSharedDamage.pop_front();
+
+            const s16 previousHealth = gSaveContext.save.saveInfo.playerData.health;
+
+            // Double Defense darf empfangenen Schaden nicht erneut halbieren
+            int damage = -static_cast<int>(pending.healthUnits);
+
+            if (gSaveContext.save.saveInfo.playerData.doubleDefense) {
+                damage *= 2;
+            }
+
+            // Verhindert eine DamageLink-Endlosschleife
+            sApplyingSharedDamage = true;
+
+            const bool survived = Health_ChangeBy(gPlayState, static_cast<s16>(damage)) != 0;
+
+            if (!survived) {
+                // Empfangener Schaden soll keinen weiteren DeathLink ausloesen
+                sSentDeathLinkThisDeath = true;
+
+                // Vorhandenen Todesmechanismus verwenden
+                gPlayState->damagePlayer(gPlayState, -1);
+
+                // Restliche Schadenspakete nach dem Tod verwerfen
+                sPendingSharedDamage.clear();
+            }
+
+            // Tatsächlich verlorene HP berechnen
+            const s16 healthAfter = gSaveContext.save.saveInfo.playerData.health;
+            const s16 actualDamage = previousHealth - healthAfter;
+
+            // Trefferreaktion nur auslösen, wenn Link überlebt hat.
+            // Die I-Frames werden in Player_ApplyDamageLinkReaction geprüft.
+            if (actualDamage > 0 && healthAfter > 0) {
+                Player_ApplyDamageLinkReaction(gPlayState, GET_PLAYER(gPlayState), actualDamage);
+            }
+
+            // Verhindert, dass empfangener Schaden zurückgesendet wird
+            sApplyingSharedDamage = false;
+
+            SPDLOG_INFO("[DamageLink] Schaden von {} angewendet: {} HP", pending.source, actualDamage);
         }
     }
 
@@ -872,6 +1005,9 @@ void Archipelago::UpdateDeathLinkTag() {
     std::list<std::string> tags;
     if (CVarGetInteger("gArchipelago.DeathLink", 0)) {
         tags.push_back("DeathLink");
+    }
+    if (CVarGetInteger("gArchipelago.DamageLink", 0)) {
+        tags.push_back("SharedDamage");
     }
     sAPClient->ConnectUpdate(false, 0, true, tags);
 }

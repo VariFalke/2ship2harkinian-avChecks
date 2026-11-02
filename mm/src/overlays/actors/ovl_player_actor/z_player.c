@@ -5876,6 +5876,8 @@ PlayerAnimationHeader* D_8085D0D4[] = {
     &gPlayerAnim_link_anchor_back_hitR,
 };
 
+static bool sDamageLinkReactionOnly = false;
+
 void func_80833B18(PlayState* play, Player* this, s32 arg2, f32 speed, f32 velocityY, s16 arg5,
                    s32 invincibilityTimer) {
     PlayerAnimationHeader* anim = NULL;
@@ -5888,7 +5890,7 @@ void func_80833B18(PlayState* play, Player* this, s32 arg2, f32 speed, f32 veloc
 
     Player_PlaySfx(this, NA_SE_PL_DAMAGE);
 
-    if (func_808339D4(play, this, -this->actor.colChkInfo.damage) == 0) {
+    if (!sDamageLinkReactionOnly && func_808339D4(play, this, -this->actor.colChkInfo.damage) == 0) {
         this->stateFlags2 &= ~PLAYER_STATE2_80;
         if ((this->actor.bgCheckFlags & BGCHECKFLAG_GROUND) || (this->stateFlags1 & PLAYER_STATE1_8000000)) {
             return;
@@ -6021,6 +6023,44 @@ void func_80833B18(PlayState* play, Player* this, s32 arg2, f32 speed, f32 veloc
     if (anim != NULL) {
         Player_Anim_PlayOnceAdjusted(play, this, anim);
     }
+}
+
+void Player_ApplyDamageLinkReaction(PlayState* play, Player* player, s16 damage) {
+    if (play == NULL || player == NULL || damage <= 0) {
+        return;
+    }
+
+    // I-Frames verhindern nur eine erneute Trefferanimation.
+    // Der eigentliche DamageLink-Schaden wird separat verarbeitet.
+    if (player->invincibilityTimer != 0 || player->csAction != PLAYER_CSACTION_NONE ||
+        (player->stateFlags1 & PLAYER_STATE1_DEAD) || gSaveContext.save.saveInfo.playerData.health <= 0) {
+        return;
+    }
+
+    s32 hitType;
+
+    if (damage <= 24) {
+        // Bis 1,5 Herzen
+        hitType = 0;
+    } else {
+        // Ab 1,5 Herzen
+        hitType = 1;
+    }
+
+    s32 originalDamage = player->actor.colChkInfo.damage;
+
+    // Simulierter Schaden für die Trefferanimation.
+    player->actor.colChkInfo.damage = 4;
+
+    // Verhindert zusätzlichen HP-Verlust.
+    sDamageLinkReactionOnly = true;
+
+    func_80833B18(play, player, hitType, 4.0f, 5.0f, player->actor.shape.rot.y + 0x8000, 20);
+
+    sDamageLinkReactionOnly = false;
+
+    // Ursprünglichen Schadenswert wiederherstellen.
+    player->actor.colChkInfo.damage = originalDamage;
 }
 
 s32 func_808340AC(FloorType floorType) {
