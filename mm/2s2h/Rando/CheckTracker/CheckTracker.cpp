@@ -86,6 +86,7 @@ static bool sCheckTrackerBtnState = false;
 #define CVAR_NAME_SHOW_CURRENT_SCENE "gRando.CheckTracker.ShowCurrentScene"
 #define CVAR_NAME_SHOW_CHECK_TYPE_FILTER "gRando.CheckTracker.ShowCheckTypeFilter"
 #define CVAR_NAME_SHOW_SEARCH "gRando.CheckTracker.ShowSearch"
+#define CVAR_NAME_SHOW_AVAILABLE_CHECKS "gRando.CheckTracker.ShowAvailableChecks"
 #define CVAR_SHOW_CHECK_TRACKER CVarGetInteger(CVAR_NAME_SHOW_CHECK_TRACKER, 0)
 #define CVAR_VISIBILITY_MODE CVarGetInteger(CVAR_NAME_VISIBILITY_MODE, CHECK_TRACKER_VISIBILITY_MODE_ALWAYS)
 #define CVAR_VISIBILITY_BTN CVarGetInteger(CVAR_NAME_VISIBILITY_BTN, BTN_CUSTOM_MODIFIER1)
@@ -101,6 +102,7 @@ static bool sCheckTrackerBtnState = false;
 #define CVAR_SHOW_CURRENT_SCENE CVarGetInteger(CVAR_NAME_SHOW_CURRENT_SCENE, 0)
 #define CVAR_SHOW_CHECK_TYPE_FILTER CVarGetInteger(CVAR_NAME_SHOW_CHECK_TYPE_FILTER, 0)
 #define CVAR_SHOW_SEARCH CVarGetInteger(CVAR_NAME_SHOW_SEARCH, 1)
+#define CVAR_SHOW_AVAILABLE_CHECKS CVarGetInteger(CVAR_NAME_SHOW_AVAILABLE_CHECKS, 1)
 
 static bool sExpandedHeadersToggle = true;
 static bool sExpandedHeadersState = true;
@@ -529,18 +531,16 @@ void CheckTrackerWindow::Draw() {
     }
 
     RefreshChecksInLogic();
-     if (CVAR_SHOW_SEARCH) {
-        bool sameLine = !(ImGui::GetContentRegionAvail().x <= 300.0f * trackerScale);
-        auto totalCheckCount = GetTotalCheckCount();
 
+    if (CVAR_SHOW_SEARCH) {
         UIWidgets::PushStyleInput();
-        sCheckTrackerFilter.Draw("##filter", (ImGui::GetContentRegionAvail().x -
-                                              (sameLine ? (ImGui::CalcTextSize("Total: ").x +
-                                                           ImGui::CalcTextSize(totalCheckCount.c_str()).x + 60.0f)
-                                                        : 40.0f)));
+
+        sCheckTrackerFilter.Draw("##filter", ImGui::GetContentRegionAvail().x - 40.0f);
+
         UIWidgets::PopStyleInput();
 
         ImGui::SameLine();
+
         if (!sCheckTrackerFilter.IsActive()) {
             if (UIWidgets::Button(ICON_FA_ARROWS_V, UIWidgets::ButtonOptions().Size(UIWidgets::Sizes::Inline))) {
                 if (gPlayState) {
@@ -552,6 +552,7 @@ void CheckTrackerWindow::Draw() {
         } else {
             if (UIWidgets::Button(ICON_FA_TIMES, UIWidgets::ButtonOptions().Size(UIWidgets::Sizes::Inline))) {
                 sCheckTrackerFilter.Clear();
+
                 if (gPlayState) {
                     sScrollToTargetScene = GetScrollTargetScene(gPlayState->sceneId);
                     sScrollToTargetEntrance = gSaveContext.save.entrance;
@@ -563,16 +564,19 @@ void CheckTrackerWindow::Draw() {
             ImGui::SameLine(18.0f);
             ImGui::Text("Search");
         }
+    }
 
-        if (sameLine) {
-            ImGui::SameLine(ImGui::GetContentRegionAvail().x -
-                            (ImGui::CalcTextSize("Total: ").x + ImGui::CalcTextSize(totalCheckCount.c_str()).x));
-        }
+    // Beide Zaehler in einer Zeile anzeigen.
+    const std::string totalCheckCount = GetTotalCheckCount();
 
+    if (CVAR_SHOW_AVAILABLE_CHECKS) {
+        ImGui::Text("Available: %zu", checksInLogic.size());
+        ImGui::SameLine();
         ImGui::Text("Total: %s", totalCheckCount.c_str());
-     }
+    } else {
+        ImGui::Text("Total: %s", totalCheckCount.c_str());
+    }
 
-     ImGui::Text("Available: %zu", checksInLogic.size());
 
      if (CVAR_SHOW_CHECK_TYPE_FILTER) {
 
@@ -704,6 +708,8 @@ void SettingsWindow::DrawElement() {
                                        UIWidgets::BtnSelectorOptions().DefaultValue(BTN_CUSTOM_MODIFIER1));
         }
         UIWidgets::CVarCheckbox("Show Search", CVAR_NAME_SHOW_SEARCH, UIWidgets::CheckboxOptions().DefaultValue(true));
+        UIWidgets::CVarCheckbox("Show Available Checks", CVAR_NAME_SHOW_AVAILABLE_CHECKS,
+                                UIWidgets::CheckboxOptions().DefaultValue(true));
         UIWidgets::CVarCheckbox("Show Check Type Filters", CVAR_NAME_SHOW_CHECK_TYPE_FILTER);
 
         if (UIWidgets::CVarSliderFloat("Opacity", CVAR_NAME_TRACKER_OPACITY,
